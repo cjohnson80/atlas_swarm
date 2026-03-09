@@ -1,4 +1,4 @@
-__version__ = '9.0.0'
+__version__ = '9.1.0'
 
 import json
 import os
@@ -365,9 +365,9 @@ class ToolBox:
                 path = path.replace("..", ".")
             return os.path.abspath(os.path.join(AGENT_ROOT, path))
 
-        # Cache check for high-latency tools
-        if action in ["web_search", "fetch_url"] and db:
-            cached = db.get_tool_cache(action, payload)
+        # Cache check for high-latency or redundant tools
+        if action in ["web_search", "fetch_url", "list_directory", "read_file", "verify_project"] and db:
+            cached = db.get_tool_cache(action, str(payload))
             if cached:
                 status("CACHE", f"Retrieved {action} result from persistent memory.", C_GREEN)
                 return cached
@@ -382,6 +382,14 @@ class ToolBox:
                     cmd = f"cd {AGENT_ROOT} && {payload}"
                     cmd = cmd.replace("mkdir -p /workspace/", f"mkdir -p {AGENT_ROOT}/workspace/")
                     cmd = cmd.replace("mkdir /workspace/", f"mkdir {AGENT_ROOT}/workspace/")
+                    
+                    # Cache Invalidation: If shell command is potentially destructive, clear relevant caches
+                    destructive_keywords = ["rm ", "mv ", "cp ", "git checkout", "git reset"]
+                    if any(k in payload for k in destructive_keywords) and db:
+                        db.clear_tool_cache("list_directory")
+                        db.clear_tool_cache("read_file")
+                        db.clear_tool_cache("verify_project")
+
                     res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
                     return f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
                 elif action == "save_muscle_memory":
@@ -398,7 +406,7 @@ class ToolBox:
                     req = urllib.request.Request(search_url, headers={'User-Agent': 'Mozilla/5.0'})
                     with urllib.request.urlopen(req, timeout=15) as response:
                         result = response.read().decode('utf-8', errors='replace')[:15000]
-                        if db: db.set_tool_cache(action, payload, result, ttl_seconds=86400) # Cache searches for 24h
+                        if db: db.set_tool_cache(action, str(payload), result, ttl_seconds=86400) # Cache searches for 24h
                         return result
                 elif action == "verify_project":
                     target_dir = path_guard(payload)
@@ -410,20 +418,32 @@ class ToolBox:
                     python_files = [f for f in os.listdir(target_dir) if f.endswith('.py')]
                     if not checks and python_files: checks.append(("Python Syntax", f"python3 -m py_compile {' '.join(python_files)}"))
                     if not checks: return "No specific project configuration found. Skipping advanced verification."
-                    results = []
+                    
+                    # Parallel Execution of Checks
+                    processes = []
                     for name, cmd in checks:
+                        status("VERIFY", f"Initiating {name}...", C_YELLOW)
+                        p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=target_dir)
+                        processes.append((name, p))
+                    
+                    results = []
+                    for name, p in processes:
                         try:
-                            status("VERIFY", f"Running {name}...", C_YELLOW)
-                            res = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=target_dir, timeout=60)
-                            if res.returncode != 0: results.append(f"{name} Failed:\n{res.stderr[:1000]}")
-                        except subprocess.TimeoutExpired: results.append(f"{name} Timed Out (60s).")
+                            stdout, stderr = p.communicate(timeout=90)
+                            if p.returncode != 0: results.append(f"{name} Failed:\n{stderr[:1000]}")
+                        except subprocess.TimeoutExpired:
+                            p.kill()
+                            results.append(f"{name} Timed Out (90s).")
                         except Exception as e: results.append(f"{name} Error: {str(e)}")
-                    return "Project is clean!" if not results else "\n".join(results)
+                    
+                    final_res = "Project is clean!" if not results else "\n".join(results)
+                    if db: db.set_tool_cache(action, str(payload), final_res, ttl_seconds=600) # Cache verification for 10m
+                    return final_res
                 elif action == "fetch_url":
                     req = urllib.request.Request(payload, headers={'User-Agent': 'Mozilla/5.0'})
                     with urllib.request.urlopen(req, timeout=15) as response:
                         result = response.read().decode('utf-8')[:10000]
-                        if db: db.set_tool_cache(action, payload, result, ttl_seconds=3600) # Cache URLs for 1h
+                        if db: db.set_tool_cache(action, str(payload), result, ttl_seconds=3600) # Cache URLs for 1h
                         return result
                 elif action == "list_directory":
                     target_dir = path_guard(payload)
@@ -431,7 +451,9 @@ class ToolBox:
                     items = os.listdir(target_dir)
                     dirs = [f"📁 {d}/" for d in items if os.path.isdir(os.path.join(target_dir, d)) and not d.startswith('.')]
                     files = [f"📄 {f}" for f in items if os.path.isfile(os.path.join(target_dir, f)) and not f.startswith('.')]
-                    return "\n".join(sorted(dirs) + sorted(files))
+                    final_res = "\n".join(sorted(dirs) + sorted(files))
+                    if db: db.set_tool_cache(action, str(payload), final_res, ttl_seconds=300) # Cache listings for 5m
+                    return final_res
                 elif action == "search_files":
                     if isinstance(payload, str):
                         try: data = json.loads(payload)
@@ -456,7 +478,9 @@ class ToolBox:
                         lines = f.readlines()
                         start = max(0, data.get('start_line', 1) - 1)
                         end = min(len(lines), data.get('end_line', len(lines)))
-                        return "".join(lines[start:end])
+                        final_res = "".join(lines[start:end])
+                        if db: db.set_tool_cache(action, str(payload), final_res, ttl_seconds=300) # Cache reads for 5m
+                        return final_res
                 elif action == "write_file":
                     if isinstance(payload, str):
                         try: data = json.loads(payload)
@@ -464,6 +488,13 @@ class ToolBox:
                     else: data = payload
                     safe_path = path_guard(data['path'])
                     os.makedirs(os.path.dirname(safe_path), exist_ok=True)
+                    
+                    # Cache Invalidation for the modified file and its directory
+                    if db:
+                        db.clear_tool_cache("read_file", data['path'])
+                        db.clear_tool_cache("list_directory", os.path.dirname(data['path']))
+                        db.clear_tool_cache("verify_project")
+
                     with open(safe_path, 'w') as f: f.write(data['content'])
                     return f"Successfully wrote to {data['path']}"
                 elif action == "notify_telegram":
@@ -946,6 +977,18 @@ class Persistence:
                     continue
                 break
 
+    def clear_tool_cache(self, action=None, payload_pattern=None):
+        """Clears specific tool cache entries to maintain consistency."""
+        try:
+            with duckdb.connect(DB_FILE) as con:
+                if action and payload_pattern:
+                    con.execute("DELETE FROM tool_cache WHERE action = ? AND payload LIKE ?", [action, f"%{payload_pattern}%"])
+                elif action:
+                    con.execute("DELETE FROM tool_cache WHERE action = ?", [action])
+                else:
+                    con.execute("DELETE FROM tool_cache")
+        except: pass
+
     def save_memory(self, goal, summary, success_score=1.0, execution_time=0.0):
         if vec := self.client.embed(goal + " " + summary):
             for _ in range(20): # Robust retry for writes
@@ -1224,6 +1267,7 @@ class AtlasSwarm:
                 </div>
                 <div class="card">
                     <h2>Atlas Swarm Status</h2>
+                    <p><b>Version:</b> {__version__}</p>
                     <p><b>Current Project:</b> {self.current_project}</p>
                     <p><b>Evolution Interval:</b> {cfg.get('evolution_interval_hrs', 4)} hours</p>
                     <p><b>Last Update:</b> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
@@ -1459,7 +1503,10 @@ Output ONLY the markdown text for this persona's system instructions.
         4. BE EFFICIENT: Use list_directory and search_files instead of blind run_shell calls. Read files in chunks.
         5. USE THE VAULT: Before building a component from scratch, search_vault to see if it exists.
         6. DEPLOYMENT: Once a mission is verified, use git_push and deploy_vercel to deliver the final product.
-        7. OUTPUT FORMAT: Reply ONLY with valid JSON: {{"thought": "...", "tool": "...", "payload": "..."}}.
+        7. OUTPUT FORMAT: Reply ONLY with valid JSON: {"thought": "...", "tool": "...", "payload": "..."}.
+        8. SINGLE-SOURCE TRUTH: Do not re-run tools (like list_directory or read_file) if the state has not changed. Transition immediately to the next phase once acceptance criteria are met.
+        9. ATOMIC DELIVERY: When generating multiple files, execute all write_file calls in a single turn if possible. Do not verify every intermediate file if not strictly necessary.
+
         """
         muscle_search_query = f"[{self.current_project.upper()}] {task_desc}"
         muscle_memory_results = self.db.search_muscle_memory(muscle_search_query, limit=3)
@@ -1639,9 +1686,10 @@ Output ONLY the markdown text for this persona's system instructions.
         prompt = (f"Goal: {user_goal}\nAcceptance Criteria: {ac_text}\n"
                   f"Design a dynamic execution graph using a swarm of specialized experts. \n"
                   f"JSON format: [{{'id':1, 'role':'Role', 'task':'...', 'parallel': false, 'on_success': 2, 'on_fail': 'TERMINATE'}}].\n"
-                  f"Available Roles: Architect, Developer, Reviewer, SecurityExpert, DatabaseArchitect, DocumentationLead, PerformanceEngineer, ToolSmith.\n"
+                  f"Available Roles: Architect, Developer, Reviewer, SecurityExpert, DatabaseArchitect, DocumentationLead, PerformanceEngineer, ToolSmith, VaultSpecialist.\n"
                   f"- Use specialized experts for critical components.\n"
-                  f"- Set 'parallel': true for independent branches to leverage my {cpu_threads} CPU threads.")
+                  f"- Set 'parallel': true for independent branches to leverage my {cpu_threads} CPU threads.\n"
+                  f"- ALWAYS include a VaultSpecialist node at the end if the mission creates new modular components or reusable patterns.")
 
         # Quota-aware generation
         plan_raw = self.client_pro.generate(prompt, system_instruction=sys_instr, json_mode=True, images=images)
