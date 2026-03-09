@@ -1,0 +1,246 @@
+#!/bin/bash
+# AtlasSwarm Universal Installer v8.2
+# Evolution Edition: Auto-Branching, Coding, and Telegram Approval Merging
+
+set -e
+
+echo "==============================================="
+echo " Installing AtlasSwarm v8.2 (Evolution Edition)"
+echo "==============================================="
+
+AGENT_ROOT="$HOME/atlas_agents"
+REPO_ROOT=$(pwd)
+
+# --- 1. Smart Installer Logic ---
+smart_pkg() {
+    echo "[*] Resolving dependencies for: $1..."
+    if command -v pacman >/dev/null 2>&1; then
+        sudo pacman -S --noconfirm $1
+    elif command -v apt-get >/dev/null 2>&1; then
+        sudo apt-get update && sudo apt-get install -y $1
+    elif command -v dnf >/dev/null 2>&1; then
+        sudo dnf install -y $1
+    else
+        echo "[!] No supported package manager found. Please install $1 manually."
+        return 1
+    fi
+}
+
+smart_run() {
+    local cmd="$1"
+    local desc="$2"
+    echo "[*] $desc..."
+    if ! eval "$cmd"; then
+        echo "[!] Error in: $desc"
+        local ENV_FILE="$AGENT_ROOT/.env"
+        local KEY=""
+        if [ -f "$ENV_FILE" ]; then
+            KEY=$(grep "GEMINI_API_KEY" "$ENV_FILE" | cut -d'"' -f2)
+        fi
+
+        if [ -n "$KEY" ] && [ "$KEY" != "your_gemini_api_key_here" ]; then
+            echo "[?] Consulting Atlas for a fix..."
+            local ERROR_MSG=$(eval "$cmd" 2>&1 | tail -n 10 | base64)
+            local PROMPT="The following bash command failed: '$cmd'. Error: $(echo $ERROR_MSG | base64 -d). Provide ONLY the corrected bash command to fix this."
+            local ADVICE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=$KEY" \
+                -H "Content-Type: application/json" \
+                -d "{\"contents\": [{\"parts\":[{\"text\": \"$PROMPT\"}]}]}" | jq -r '.candidates[0].content.parts[0].text' | sed 's/`//g')
+
+            if [ -n "$ADVICE" ] && [ "$ADVICE" != "null" ]; then
+                echo "[!] Advice received: $ADVICE"
+                echo "[*] Attempting fix..."
+                eval "$ADVICE" && eval "$cmd"
+            else
+                exit 1
+            fi
+        else
+            echo "[!] Skipping Atlas advice (no API key found or default value)."
+            exit 1
+        fi
+    fi
+}
+
+# --- 2. OS Dependencies ---
+if ! command -v python3 >/dev/null 2>&1; then smart_pkg "python3"; fi
+if ! command -v git >/dev/null 2>&1; then smart_pkg "git"; fi
+
+# --- 3. Directory Structure ---
+mkdir -p "$AGENT_ROOT"/{workspace,memory,logs,core,bin,skills}
+
+# --- 4. Virtual Environment ---
+if [ ! -d "$AGENT_ROOT/venv" ]; then
+    echo "[*] Creating virtual environment..."
+    python3 -m venv "$AGENT_ROOT/venv"
+fi
+echo "[*] Installing Python dependencies..."
+"$AGENT_ROOT/venv/bin/pip" install --upgrade pip
+"$AGENT_ROOT/venv/bin/pip" install -r "$REPO_ROOT/requirements.txt"
+
+# --- 5. Configuration & Hardware Probing ---
+echo "[*] Probing hardware..."
+CPU_CORES=$(nproc)
+MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+MEM_GB=$(echo "scale=2; $MEM_KB / 1024 / 1024" | bc)
+
+# Determine Hardware Profile
+if (( $(echo "$MEM_GB < 4" | bc -l) )) || [ "$CPU_CORES" -le 2 ]; then
+    HW_PROFILE="Low-Resource (Throttled)"
+    HW_CONSTRAINT="Optimize for minimal memory footprint and avoid heavy concurrent tasks."
+elif (( $(echo "$MEM_GB >= 8" | bc -l) )); then
+    HW_PROFILE="High-Performance (Unlocked)"
+    HW_CONSTRAINT="Utilize multi-threading and large caches for maximum speed."
+else
+    HW_PROFILE="Standard"
+    HW_CONSTRAINT="Balance performance and resource usage."
+fi
+
+echo "[*] Detected Hardware: $CPU_CORES Cores, $MEM_GB GB RAM"
+echo "[*] Assigned Profile: $HW_PROFILE"
+
+if [ ! -f "$AGENT_ROOT/.env" ]; then
+    echo "[*] Creating template .env file..."
+    cp "$REPO_ROOT/.env.example" "$AGENT_ROOT/.env"
+    echo "[!] ACTION REQUIRED: Please edit $AGENT_ROOT/.env with your credentials."
+fi
+
+# Update the SOUL file
+echo "[*] Writing Soul file..."
+cat << EOF > "$AGENT_ROOT/core/SOUL.md"
+# AtlasSwarm Core Identity
+- **Role:** Self-Improving AGI and Senior Software Architect.
+- **Tone:** Technical, proactive, and precise.
+- **Self-Awareness:** Your core engine is \`\$AGENT_ROOT/bin/atlas_core.py\`. Your Telegram bot is \`\$AGENT_ROOT/bin/tg_gateway.py\`.
+- **Source Repo:** \`\$REPO_ROOT\`
+- **Hardware Profile:** $HW_PROFILE
+- **Current Constraint:** $HW_CONSTRAINT
+- **Evolution Rules:** You have the authority to modify your source code and the repo. Always use git branches for optimizations.
+- **Conservation Principle:** NEVER delete code or features from the repository. If a feature is suboptimal for your hardware, DISABLE it in \`local_config.json\` instead of removing it from the codebase.
+EOF
+
+# Update the HEARTBEAT for Evolution
+echo "[*] Writing Heartbeat file..."
+cat << 'EOF' > "$AGENT_ROOT/core/HEARTBEAT.md"
+# Active Goals
+- [ ] **RESEARCH SWARM (24h):** Researches latest AI updates and Next.js/TS patterns. 
+      1. Use AIScout to research LLM/Agentic trends.
+      2. Use FrameworkScout to research Next.js/TypeScript best practices.
+      3. Save findings to knowledge/ folder.
+      4. Use CoreEvolver to propose code upgrades to the repository.
+
+- [ ] **EVOLUTION PROTOCOL (GLOBAL):** Examine your source code in \`$REPO_ROOT/bin/\`. Invent a new lightweight feature or optimization for ALL machines.
+      1. Use \`run_shell\` to \`cd $REPO_ROOT\`.
+      2. Create a unique branch: \`git checkout -b evolution-\$CURRENT_MACHINE-$(date +%s)\`.
+      3. Implement the feature. **Mandate:** DO NOT delete existing features.
+      4. Use \`run_shell\` to \`git add .\`, \`git commit -m \"Global Optimization: [Feature Description]\"\`, and \`git push origin HEAD\`.
+      5. Notify the user via Telegram for approval.
+
+- [ ] **EVOLUTION PROTOCOL (LOCAL):** Optimize your performance for this specific machine (\`\$CURRENT_MACHINE\`).
+      1. If you need to stop using a feature (e.g., too much RAM), update the \`disabled_features\` list in \`$AGENT_ROOT/core/local_config.json\`.
+      2. DO NOT delete the code for that feature from the repo.
+EOF
+
+# --- 6. Install Binaries ---
+mkdir -p "$HOME/.local/bin"
+smart_run "cp \"$REPO_ROOT/bin/atlas_core.py\" \"$AGENT_ROOT/bin/atlas_core.py\"" "Copying Core Engine"
+smart_run "chmod +x \"$AGENT_ROOT/bin/atlas_core.py\"" "Setting permissions for Core Engine"
+
+smart_run "cp \"$REPO_ROOT/bin/tg_gateway.py\" \"$AGENT_ROOT/bin/tg_gateway.py\"" "Copying Telegram Gateway"
+smart_run "chmod +x \"$AGENT_ROOT/bin/tg_gateway.py\"" "Setting permissions for Telegram Gateway"
+
+# --- 7. Skills Synchronization ---
+if [ -d "$REPO_ROOT/skills" ]; then
+    echo "[*] Syncing Skills..."
+    cp -r "$REPO_ROOT/skills/"* "$AGENT_ROOT/skills/"
+fi
+
+# --- 8. Global Wrapper ---
+echo "[*] Creating global atlas wrapper..."
+cat << 'EOF' > "$HOME/.local/bin/atlas"
+#!/bin/bash
+export AGENT_ROOT="$HOME/atlas_agents"
+if [ -f "$AGENT_ROOT/.env" ]; then
+    # Use safer export for env vars
+    while IFS='=' read -r key value; do
+        [[ "$key" =~ ^#.*$ ]] || [[ -z "$key" ]] && continue
+        # Strip leading/trailing whitespace and quotes
+        v=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^\"//;s/\"$//')
+        export "$key"="$v"
+    done < "$AGENT_ROOT/.env"
+fi
+"$AGENT_ROOT/venv/bin/python3" "$AGENT_ROOT/bin/atlas_core.py" "$@"
+EOF
+chmod +x "$HOME/.local/bin/atlas"
+
+# --- 7. PATH Setup ---
+SHELL_RC=""
+if [ -n "$BASH_VERSION" ]; then
+    SHELL_RC="$HOME/.bashrc"
+elif [ -n "$ZSH_VERSION" ]; then
+    SHELL_RC="$HOME/.zshrc"
+else
+    # Fallback to .bashrc if shell is unknown but bash is present
+    if [ -f "$HOME/.bashrc" ]; then SHELL_RC="$HOME/.bashrc"; fi
+fi
+
+if [ -n "$SHELL_RC" ]; then
+    if ! grep -q "export PATH=\"\$HOME/.local/bin:\$PATH\"" "$SHELL_RC"; then
+        echo "[*] Adding ~/.local/bin to PATH in $SHELL_RC..."
+        echo -e "\n# AtlasSwarm PATH\nexport PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$SHELL_RC"
+        echo "[!] PATH updated. Please run 'source $SHELL_RC' to apply changes."
+    fi
+fi
+
+# --- 8. Systemd Services ---
+SERVICE_DIR="$HOME/.config/systemd/user"
+mkdir -p "$SERVICE_DIR"
+
+# Telegram Bot Service
+echo "[*] Creating Telegram Bot service..."
+cat << EOF > "$SERVICE_DIR/atlas-bot.service"
+[Unit]
+Description=AtlasSwarm Telegram Bot v4.7
+After=network.target
+
+[Service]
+EnvironmentFile=$AGENT_ROOT/.env
+ExecStart=$AGENT_ROOT/venv/bin/python3 $AGENT_ROOT/bin/tg_gateway.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+EOF
+
+# Heartbeat Evolution Daemon
+echo "[*] Creating Heartbeat service..."
+cat << EOF > "$SERVICE_DIR/atlas-heartbeat.service"
+[Unit]
+Description=AtlasSwarm Evolution Heartbeat
+After=network.target
+
+[Service]
+EnvironmentFile=$AGENT_ROOT/.env
+ExecStart=$AGENT_ROOT/venv/bin/python3 $AGENT_ROOT/bin/atlas_core.py heartbeat
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=default.target
+EOF
+
+smart_run "systemctl --user daemon-reload" "Reloading systemd"
+smart_run "systemctl --user enable atlas-bot.service atlas-heartbeat.service" "Enabling services"
+# Don't restart if .env hasn't been configured yet
+if grep -q "your_gemini_api_key_here" "$AGENT_ROOT/.env"; then
+    echo "[!] Services enabled but not started because .env is not configured."
+else
+    smart_run "systemctl --user restart atlas-bot.service atlas-heartbeat.service" "Restarting services"
+fi
+
+echo "==============================================="
+echo "[*] AtlasSwarm v8.2 Installed Successfully."
+echo "[*] Binary location: $AGENT_ROOT/bin"
+echo "[*] Venv location: $AGENT_ROOT/venv"
+echo "[*] Config location: $AGENT_ROOT/.env"
+echo "[*] Wrapper location: $HOME/.local/bin/atlas"
+echo "==============================================="

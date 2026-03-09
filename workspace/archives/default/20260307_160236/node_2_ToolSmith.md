@@ -1,0 +1,1 @@
+{"thought": "I will search for Gemini API rate limiting best practices and technical solutions like adaptive throttling and queuing to design a high-efficiency Skill pattern.", "tool": "web_search", "payload": "Gemini API rate limit 429 handling best practices adaptive throttling request queuing"}

@@ -1,0 +1,1 @@
+{"thought": "I will search the vault for any existing rate limiting or API resilience patterns to ensure the new skill is unique and complementary.", "tool": "search_vault", "payload": "rate limiting API resilience"}

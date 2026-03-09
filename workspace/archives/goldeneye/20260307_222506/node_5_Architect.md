@@ -1,0 +1,1 @@
+{"thought": "I am initiating a surgical mapping of the GoldenEye source directory to visualize the component hierarchy. This is the first step in identifying RSC optimization opportunities and enforcing strict 'use client' boundaries.", "tool": "run_shell", "payload": "find workspace/goldeneye -maxdepth 3 -not -path '*/.*'"}

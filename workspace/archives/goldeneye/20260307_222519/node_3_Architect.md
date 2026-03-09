@@ -1,0 +1,1 @@
+{"thought": "Sizing up the core architecture. I need to inspect `bin/atlas_core.py` to identify the exact injection points for the 'Map-First' system prompt update and the 'Traceback-First' error handling logic.", "tool": "read_file", "payload": "{\"path\": \"bin/atlas_core.py\"}"}

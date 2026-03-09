@@ -1,0 +1,55 @@
+# Atlas Backend with Gemini-CLI + SSH Integration
+FROM node:20-slim AS gemini-installer
+RUN npm install -g @google/gemini-cli
+
+FROM python:3.11-slim
+WORKDIR /app
+
+# Install system dependencies including OpenSSH
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    ca-certificates \
+    nodejs \
+    npm \
+    git \
+    openssh-server \
+    && rm -rf /var/lib/apt/lists/*
+
+# Setup SSH
+RUN mkdir -p /var/run/sshd && \
+    echo 'root:atlas' | chpasswd && \
+    ssh-keygen -A && \
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/session    required     pam_loginuid.so/session    optional     pam_loginuid.so/g' /etc/pam.d/sshd
+
+# Copy gemini-cli from the installer stage
+COPY --from=gemini-installer /usr/local/lib/node_modules/@google /usr/local/lib/node_modules/@google
+RUN ln -s /usr/local/lib/node_modules/@google/gemini-cli/dist/index.js /usr/local/bin/gemini
+
+# Create atlas command wrapper
+RUN echo '#!/bin/bash\npython3 /app/bin/atlas_core.py "$@"' > /usr/local/bin/atlas && \
+    chmod +x /usr/local/bin/atlas
+
+# Install PM2
+RUN npm install -g pm2
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install fastapi uvicorn requests python-dotenv python-multipart redis duckdb polars pyarrow
+
+# Copy application files
+COPY bin/ ./bin/
+COPY core/ ./core/
+COPY data/ ./data/
+COPY ecosystem.config.js .
+COPY .env .
+
+# Entrypoint script to start SSH and PM2
+RUN echo '#!/bin/bash\n/usr/sbin/sshd\npm2-runtime start ecosystem.config.js' > /app/entrypoint.sh && \
+    chmod +x /app/entrypoint.sh
+
+EXPOSE 8000 22
+
+CMD ["/app/entrypoint.sh"]

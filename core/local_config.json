@@ -1,0 +1,20 @@
+{
+    "max_threads": 8,
+    "cache_size": "2GB",
+    "profile": "high-performance",
+    "model_overrides": {},
+    "disabled_features": [],
+    "evolution_enabled": true,
+    "local_llm_enabled": true,
+    "local_model": "qwen2.5-coder:3b",
+    "evolution_interval_hrs": 4,
+    "evolution_count": 4,
+    "heartbeat_sleep_sec": 5,
+    "_current_probe": {
+        "max_threads": 8,
+        "cache_size": "2GB",
+        "profile": "high-performance",
+        "cpu_count": 8,
+        "mem_gb": 11.58
+    }
+}

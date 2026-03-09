@@ -1,0 +1,1 @@
+{"thought": "I am mapping the 'src' directory of Project GoldenEye to identify candidate components for RSC migration and determine the current utility structure for consolidation.", "tool": "run_shell", "payload": "find workspace/goldeneye/src -maxdepth 3 -not -path '*/.*' 2>/dev/null || echo 'src directory not found'"}

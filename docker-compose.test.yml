@@ -1,0 +1,6 @@
+services:
+  atlas-backend-test:
+    image: atlas-gemini-backend:latest
+    environment:
+      - AGENT_ROOT=/app
+    command: gemini --version

@@ -1,0 +1,55 @@
+services:
+  atlas-api:
+    image: atlas-gemini-backend:latest
+    ports:
+      - "8080:8000"
+      - "2222:22"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - AGENT_ROOT=/app
+      - PORT=8000
+    volumes:
+      - ./bin:/app/bin
+      - ./logs:/app/logs
+      - ./core:/app/core
+      - ./memory:/app/memory
+    restart: always
+    depends_on:
+      - ollama
+
+  atlas-frontend:
+    image: atlas-frontend:latest
+    ports:
+      - "3002:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    restart: always
+    depends_on:
+      - atlas-api
+
+  atlas-tg-gateway:
+    image: atlas-gemini-backend:latest
+    command: python bin/tg_gateway.py
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - AGENT_ROOT=/app
+    volumes:
+      - ./bin:/app/bin
+      - ./logs:/app/logs
+      - ./core:/app/core
+      - ./memory:/app/memory
+    restart: always
+    depends_on:
+      - atlas-api
+      - ollama
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: always
+
+volumes:
+  ollama_data:
