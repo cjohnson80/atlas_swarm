@@ -14,6 +14,7 @@ import time
 import psutil
 import gc
 import signal
+import fcntl
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters
 
@@ -48,6 +49,26 @@ MY_HOSTNAME = subprocess.run(["hostname"], capture_output=True, text=True).stdou
 API_BASE_URL = os.getenv("API_BASE_URL", "http://atlas-api:8000")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
 
+# Singleton Lock
+LOCKFILE_PATH = os.path.join(AGENT_ROOT, "logs/tg_gateway.lock")
+
+def ensure_singleton():
+    """Uses fcntl advisory locking to prevent multiple instances of the gateway."""
+    lock_file = open(LOCKFILE_PATH, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # Write PID to lockfile for visibility
+        lock_file.write(str(os.getpid()))
+        lock_file.flush()
+        # Keep the file handle open to maintain the lock
+        return lock_file
+    except BlockingIOError:
+        print(f"[-] FATAL: Another instance of the Telegram Gateway is already running (Locked: {LOCKFILE_PATH}).")
+        sys.exit(1)
+
+# Execute Singleton Check at Startup
+_singleton_lock = ensure_singleton()
+
 async def local_triage(text):
     """Uses the local LLM to decide if the user wants to execute a specific system command via natural language."""
     prompt = f"""
@@ -69,7 +90,7 @@ async def local_triage(text):
                 "prompt": prompt,
                 "stream": False,
                 "format": "json"
-            }, timeout=10.0)
+            }, timeout=60.0)
             if res.status_code == 200:
                 data = res.json()
                 return json.loads(data['response'])

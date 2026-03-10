@@ -148,12 +148,25 @@ async def get_status():
         "status": "online"
     }
 
+from bin.ast_analyzer import AtlasASTAnalyzer
+
 @app.get("/projects")
 async def list_projects():
     if not os.path.exists(WORKSPACE):
         return []
     projects = [p for p in os.listdir(WORKSPACE) if os.path.isdir(os.path.join(WORKSPACE, p))]
     return projects
+
+@app.get("/ast")
+async def get_ast(project: Optional[str] = None):
+    """Streams the real-time architectural topology for the Cockpit 3D IDE."""
+    analyzer = AtlasASTAnalyzer(os.path.expanduser("~/atlas_agents"))
+    target = os.path.join(WORKSPACE, project) if project and project != "default" else "bin"
+    try:
+        topology = analyzer.get_topology(target)
+        return {"status": "ok", "topology": topology}
+    except Exception as e:
+        return {"status": "error", "msg": str(e)}
 
 class NotifyRequest(BaseModel):
     message: str
