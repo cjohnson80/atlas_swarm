@@ -1,0 +1,14 @@
+logs/*.log*
+logs/*.out
+logs/*.tmp
+logs/*.lock
+bin/__pycache__/
+memory/memory.db
+memory/mission_state/
+memory/state/*.json
+*.pyc
+.next/
+node_modules/
+dist/
+build/
+.env

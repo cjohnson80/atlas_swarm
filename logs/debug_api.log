@@ -1,7 +1,0 @@
-Traceback (most recent call last):
-  File "/home/chrisj/atlas_agents/bin/api_gateway.py", line 15, in <module>
-    from gemini_mas import GeminiMAS, read_local_config, WORKSPACE
-  File "/home/chrisj/atlas_agents/bin/gemini_mas.py", line 1435
-    yield {"type": "final_answer", "msg": full_resp}def heartbeat_daemon(api_key):
-                                                    ^^^
-SyntaxError: invalid syntax
