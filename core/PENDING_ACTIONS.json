@@ -1,0 +1,6 @@
+[
+  {"task": "SFC_HARDENING", "action": "Implement sharded locks and canonical hashing in bin/atlas_core.py", "priority": "CRITICAL"},
+  {"task": "PROCESS_REAPER", "action": "Update atomic_executor.py to use psutil for SIGKILL enforcement on timeouts", "priority": "HIGH"},
+  {"task": "CIRCUIT_BREAKER_V2", "action": "Implement Half-Open recovery state for DEGRADED_MODE", "priority": "HIGH"},
+  {"task": "SPATIAL_LOD_SCAFFOLD", "action": "Initialize Three.js Octree for repository visualization in /cockpit", "priority": "MEDIUM"}
+]
